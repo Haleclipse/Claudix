@@ -28,6 +28,7 @@
         <button
           class="action-button think-button"
           :class="{ 'thinking-active': isThinkingOn }"
+          data-responsive="hide-small"
           @click="handleThinkingToggle"
           :aria-label="isThinkingOn ? 'Thinking on' : 'Thinking off'"
           :title="isThinkingOn ? 'Thinking on' : 'Thinking off'"
@@ -51,6 +52,7 @@
           <template #trigger>
             <button
               class="action-button"
+              data-responsive="hide-small"
               aria-label="Slash Commands"
             >
               <span class="codicon codicon-italic text-[16px]!" />
@@ -397,6 +399,8 @@ function handleMentionKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   cursor: auto;
   width: 100%;
+  container-type: inline-size;
+  container-name: toolbar;
 }
 
 .button-row {
