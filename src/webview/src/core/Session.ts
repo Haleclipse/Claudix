@@ -65,6 +65,7 @@ export class Session {
   private currentConnectionPromise?: Promise<BaseTransport>;
   private lastSentSelection?: SelectionRange;
   private effectCleanup?: () => void;
+  private hasExplicitlySetPermissionMode = false;
 
   readonly connection = signal<BaseTransport | undefined>(undefined);
 
@@ -263,6 +264,15 @@ export class Session {
       this.thinkingLevel(connection.config()?.thinkingLevel || 'default_on');
     }
 
+    const config = connection.config?.();
+    if (
+      config?.initialPermissionMode &&
+      this.permissionMode() === 'default' &&
+      !this.hasExplicitlySetPermissionMode
+    ) {
+      this.permissionMode(config.initialPermissionMode);
+    }
+
     const stream = connection.launchClaude(
       channelId,
       this.sessionId() ?? undefined,
@@ -298,6 +308,7 @@ export class Session {
   }
 
   async setPermissionMode(mode: PermissionMode, applyToConnection = true): Promise<boolean> {
+    this.hasExplicitlySetPermissionMode = true;
     const previous = this.permissionMode();
     this.permissionMode(mode);
 

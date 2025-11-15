@@ -107,6 +107,10 @@ export async function handleInit(
     // 获取 thinking level (默认值)
     const thinkingLevel = 'default_on';
 
+    // 获取初始权限模式（默认 default）
+    const initialPermissionModeSetting = configService.getValue<string>('claudix.initialPermissionMode');
+    const initialPermissionMode: PermissionMode = (initialPermissionModeSetting as PermissionMode) || 'default';
+
     return {
         type: "init_response",
         state: {
@@ -115,7 +119,8 @@ export async function handleInit(
             // authStatus,
             modelSetting,
             platform: process.platform,
-            thinkingLevel
+            thinkingLevel,
+            initialPermissionMode
         }
     };
 }
