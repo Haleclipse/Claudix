@@ -126,6 +126,7 @@ export class ClaudeSdkService implements IClaudeSdkService {
             model: modelParam,
             permissionMode: permissionModeParam,
             maxThinkingTokens: maxThinkingTokens,
+            allowDangerouslySkipPermissions: true,
 
             // CanUseTool 回调
             canUseTool,
@@ -190,9 +191,6 @@ export class ClaudeSdkService implements IClaudeSdkService {
 
             // CLI 可执行文件路径
             pathToClaudeCodeExecutable: this.getClaudeExecutablePath(),
-
-            // 额外参数
-            extraArgs: {} as Record<string, string | null>,
 
             // 设置源
             // 'user': ~/.claude/settings.json (API 密钥)

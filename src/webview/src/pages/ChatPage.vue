@@ -283,7 +283,7 @@
   const togglePermissionMode = () => {
     const s = session.value;
     if (!s) return;
-    const order: PermissionMode[] = ['default', 'acceptEdits', 'plan'];
+    const order: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
     const cur = (s.permissionMode.value as PermissionMode) ?? 'default';
     const idx = Math.max(0, order.indexOf(cur));
     const next = order[(idx + 1) % order.length];

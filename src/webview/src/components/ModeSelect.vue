@@ -52,6 +52,18 @@
         :index="2"
         @click="(item) => handleModeSelect(item, close)"
       />
+      <DropdownItem
+        :item="{
+          id: 'bypassPermissions',
+          label: 'Bypass',
+          icon: 'codicon-warning text-[14px]!',
+          checked: permissionMode === 'bypassPermissions',
+          type: 'bypass-mode'
+        }"
+        :is-selected="permissionMode === 'bypassPermissions'"
+        :index="3"
+        @click="(item) => handleModeSelect(item, close)"
+      />
     </template>
   </DropdownTrigger>
 </template>
@@ -82,6 +94,8 @@ const selectedModeLabel = computed(() => {
       return 'Agent'
     case 'plan':
       return 'Plan'
+    case 'bypassPermissions':
+      return 'Bypass'
     case 'default':
       return 'Default'
     default:
@@ -96,6 +110,8 @@ const selectedModeIcon = computed(() => {
       return 'codicon-infinity'
     case 'plan':
       return 'codicon-todos'
+    case 'bypassPermissions':
+      return 'codicon-warning'
     case 'default':
       return 'codicon-chat'
     default:
