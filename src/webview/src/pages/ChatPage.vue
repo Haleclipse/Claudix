@@ -171,6 +171,9 @@
   // 记录上次消息数量，用于判断是否需要滚动
   let prevCount = 0;
 
+  // 滚动阈值
+  const SCROLL_UP_THRESHOLD = 300;
+
   function stringify(m: any): string {
     try {
       return JSON.stringify(m ?? {}, null, 2);
@@ -180,6 +183,8 @@
   }
 
   function scrollToBottom(): void {
+    // 只要前往底部，清除上滚状态
+    hasScrolledUp.value = false;
     const end = endEl.value;
     if (!end) return;
     requestAnimationFrame(() => {
@@ -198,12 +203,13 @@
 
   // moved above
 
+  const hasScrolledUp = ref(false);
   watch(
     () => messages.value.length,
     async len => {
       const increased = len > prevCount;
       prevCount = len;
-      if (increased) {
+      if (increased && !hasScrolledUp.value) {
         await nextTick();
         scrollToBottom();
       }
@@ -211,19 +217,49 @@
   );
 
   watch(permissionRequestsLen, async () => {
-    // 有权限请求出现时也确保滚动到底部
-    await nextTick();
-    scrollToBottom();
+    // 有权限请求时，只在用户没有主动向上滚动时才滚动到底部
+    if (!hasScrolledUp.value) {
+      await nextTick();
+      scrollToBottom();
+    }
   });
+
+  // 滚动事件处理
+  function handleScroll() {
+    const container = containerEl.value;
+    if (!container) return;
+
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+
+    // 计算距离底部的距离
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+    // 如果距离底部超过阈值，说明用户向上滚动了
+    hasScrolledUp.value = distanceFromBottom > SCROLL_UP_THRESHOLD;
+  }
 
   onMounted(async () => {
     prevCount = messages.value.length;
     await nextTick();
     scrollToBottom();
+
+    // 添加滚动监听
+    const container = containerEl.value;
+    if (container) {
+      container.addEventListener('scroll', handleScroll, { passive: true });
+    }
   });
 
   onUnmounted(() => {
     try { unregisterToggle?.(); } catch {}
+
+    // 移除滚动监听
+    const container = containerEl.value;
+    if (container) {
+      container.removeEventListener('scroll', handleScroll);
+    }
   });
 
   async function createNew(): Promise<void> {
@@ -257,6 +293,9 @@
 
       // 发送成功后清空附件
       attachments.value = [];
+
+      // 重置滚动状态
+      hasScrolledUp.value = false;
     } catch (e) {
       console.error('[ChatPage] send failed', e);
     }
