@@ -52,6 +52,16 @@
         </div>
 
         <div class="inputContainer">
+
+          <!-- 回到底部按钮 -->
+          <button
+            v-if="hasScrolledUp"
+            class="scroll-to-bottom-btn"
+            @click="scrollToBottom"
+            title="回到底部"
+          >
+            <span class="codicon codicon-arrow-down"></span>
+          </button>
           <PermissionRequestModal
             v-if="pendingPermission && toolContext"
             :request="pendingPermission"
@@ -554,6 +564,7 @@
 
   /* 输入区域容器 */
   .inputContainer {
+    position: relative;
     padding: 8px 12px 12px;
   }
 
@@ -582,5 +593,29 @@
     align-items: center;
     justify-content: center;
     margin-bottom: 24px;
+  }
+
+  /* 回到底部按钮 */
+  .scroll-to-bottom-btn {
+    position: absolute;
+    right: 16px;
+    top: -34px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    transition: background-color 0.2s;
+    z-index: 10;
+  }
+
+  .scroll-to-bottom-btn:hover {
+    background: var(--vscode-button-hoverBackground);
   }
 </style>
