@@ -292,9 +292,9 @@ export class Session {
     await this.launchClaude();
   }
 
-  async listFiles(pattern?: string): Promise<any> {
+  async listFiles(pattern?: string, signal?: AbortSignal): Promise<any> {
     const connection = await this.getConnection();
-    return connection.listFiles(pattern);
+    return connection.listFiles(pattern, signal);
   }
 
   async setPermissionMode(mode: PermissionMode, applyToConnection = true): Promise<boolean> {

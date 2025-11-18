@@ -43,8 +43,8 @@ export interface CompletionConfig<T> {
   /** 触发符（inline 模式必需，如 '/' 或 '@'） */
   trigger?: string
 
-  /** 数据提供者函数 */
-  provider: (query: string) => Promise<T[]> | T[]
+  /** 数据提供者函数（支持可选的 AbortSignal 用于取消请求） */
+  provider: (query: string, signal?: AbortSignal) => Promise<T[]> | T[]
 
   /** 将数据项转换为 DropdownItem 格式 */
   toDropdownItem: (item: T) => DropdownItemType
