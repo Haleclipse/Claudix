@@ -170,8 +170,11 @@ export abstract class BaseTransport {
   getSession(sessionId: string): Promise<any> {
     return this.sendRequest({ type: "get_session_request", sessionId });
   }
-  listFiles(pattern?: string): Promise<any> {
-    return this.sendRequest({ type: "list_files_request", pattern });
+  listFiles(pattern?: string, signal?: AbortSignal): Promise<any> {
+    return this.sendRequest({ type: "list_files_request", pattern }, undefined, signal);
+  }
+  statPaths(paths: string[]): Promise<any> {
+    return this.sendRequest({ type: "stat_path_request", paths });
   }
   startNewConversationTab(initialPrompt?: string): Promise<any> {
     return this.sendRequest({

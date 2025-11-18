@@ -18,11 +18,13 @@ export interface CommandWithSection extends CommandAction {
  *
  * @param query 搜索查询（可选）
  * @param runtime Runtime 实例
+ * @param _signal 未使用,仅为保持接口一致性
  * @returns 命令列表
  */
 export function getSlashCommands(
   query: string,
-  runtime: RuntimeInstance | undefined
+  runtime: RuntimeInstance | undefined,
+  _signal?: AbortSignal
 ): CommandAction[] {
   if (!runtime) return []
 

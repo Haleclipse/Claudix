@@ -38,6 +38,8 @@ import type {
     ExecResponse,
     ListFilesRequest,
     ListFilesResponse,
+    StatPathRequest,
+    StatPathResponse,
     OpenContentRequest,
     OpenContentResponse,
     OpenURLRequest,
@@ -56,31 +58,6 @@ import type {
 import type { HandlerContext } from './types';
 import type { PermissionMode, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { AsyncStream } from '../transport/AsyncStream';
-
-// ============================================================================
-// 常量定义
-// ============================================================================
-
-const DEFAULT_EXCLUDE_PATTERNS = [
-    '**/node_modules/**',
-    '**/.git/**',
-    '**/dist/**',
-    '**/build/**',
-    '**/.next/**',
-    '**/.nuxt/**',
-    '**/.DS_Store',
-    '**/Thumbs.db',
-    '**/*.log',
-    '**/.env',
-    '**/.env.*',
-    '**/yarn-error.log',
-    '**/npm-debug.log*'
-] as const;
-
-// ============================================================================
-// Handler 实现
-// ============================================================================
-
 /**
  * 初始化请求
  */
@@ -170,11 +147,13 @@ export async function handleOpenFile(
     request: OpenFileRequest,
     context: HandlerContext
 ): Promise<OpenFileResponse> {
-    const { logService } = context;
+    const { logService, workspaceService, fileSystemService } = context;
+    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
     const { filePath, location } = request;
 
     try {
-        const resolvedPath = await resolveExistingPath(filePath, context);
+        const searchResults = await fileSystemService.findFiles(filePath, cwd);
+        const resolvedPath = await fileSystemService.resolveExistingPath(filePath, cwd, searchResults);
         const stat = await fs.promises.stat(resolvedPath);
         const uri = vscode.Uri.file(resolvedPath);
 
@@ -308,13 +287,13 @@ export async function handleOpenDiff(
     context: HandlerContext,
     signal: AbortSignal
 ): Promise<OpenDiffResponse> {
-    const { logService, workspaceService } = context;
+    const { logService, workspaceService, fileSystemService } = context;
     const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
 
     logService.info(`Opening diff for: ${request.originalFilePath}`);
 
-    const originalPath = resolveFilePath(request.originalFilePath, cwd);
-    const fallbackNewPath = request.newFilePath ? resolveFilePath(request.newFilePath, cwd) : undefined;
+    const originalPath = fileSystemService.resolveFilePath(request.originalFilePath, cwd);
+    const fallbackNewPath = request.newFilePath ? fileSystemService.resolveFilePath(request.newFilePath, cwd) : undefined;
 
     if (signal.aborted) {
         return {
@@ -323,12 +302,12 @@ export async function handleOpenDiff(
         };
     }
 
-    const rightPath = await prepareDiffRightFile(originalPath, fallbackNewPath, request.edits);
+    const rightPath = await prepareDiffRightFile(originalPath, fallbackNewPath, request.edits, context);
 
-    const leftExists = await pathExists(originalPath);
+    const leftExists = await fileSystemService.pathExists(originalPath);
     const leftPath = leftExists
         ? originalPath
-        : await createTempFile(path.basename(request.originalFilePath || request.newFilePath || "untitled"), "");
+        : await fileSystemService.createTempFile(path.basename(request.originalFilePath || request.newFilePath || "untitled"), "");
 
     const leftUri = vscode.Uri.file(leftPath);
     const rightUri = vscode.Uri.file(rightPath);
@@ -464,11 +443,51 @@ export async function handleListFiles(
     request: ListFilesRequest,
     context: HandlerContext
 ): Promise<ListFilesResponse> {
-    const { pattern } = request;
+    const { workspaceService, fileSystemService } = context;
+    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
 
     return {
         type: "list_files_response",
-        files: await findFiles(pattern, context)
+        files: await fileSystemService.findFiles(request.pattern, cwd)
+    };
+}
+
+/**
+ * 统计路径类型（文件 / 目录 / 其它）
+ */
+export async function handleStatPath(
+    request: StatPathRequest,
+    context: HandlerContext
+): Promise<StatPathResponse> {
+    const { workspaceService, fileSystemService } = context;
+    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
+    const paths = Array.isArray(request.paths) ? request.paths : [];
+
+    const entries: StatPathResponse["entries"] = [];
+
+    for (const raw of paths) {
+        if (!raw || typeof raw !== "string") {
+            continue;
+        }
+
+        const absolute = fileSystemService.normalizeAbsolutePath(raw, cwd);
+
+        try {
+            const stat = await fs.promises.stat(absolute);
+            let type: StatPathResponse["entries"][number]["type"] = "other";
+
+            if (stat.isFile()) type = "file";
+            else if (stat.isDirectory()) type = "directory";
+
+            entries.push({ path: raw, type });
+        } catch {
+            entries.push({ path: raw, type: "not_found" });
+        }
+    }
+
+    return {
+        type: "stat_path_response",
+        entries
     };
 }
 
@@ -480,7 +499,7 @@ export async function handleOpenContent(
     context: HandlerContext,
     signal: AbortSignal
 ): Promise<OpenContentResponse> {
-    const { logService } = context;
+    const { logService, fileSystemService } = context;
     const { content, fileName, editable } = request;
 
     logService.info(`Opening content as: ${fileName} (editable: ${editable})`);
@@ -497,7 +516,7 @@ export async function handleOpenContent(
         };
     }
 
-    const tempPath = await createTempFile(fileName || "claude.txt", content);
+    const tempPath = await fileSystemService.createTempFile(fileName || "claude.txt", content);
     const tempUri = vscode.Uri.file(tempPath);
     const document = await vscode.workspace.openTextDocument(tempUri);
     await vscode.window.showTextDocument(document, { preview: false });
@@ -757,542 +776,17 @@ function getAssetUris(context: HandlerContext): Record<string, { light: string; 
 // 辅助方法
 // ============================================================================
 
-function resolveFilePath(filePath: string, cwd: string): string {
-    if (!filePath) {
-        return cwd;
-    }
-
-    const expanded = filePath.startsWith("~")
-        ? path.join(os.homedir(), filePath.slice(1))
-        : filePath;
-
-    const absolute = path.isAbsolute(expanded)
-        ? expanded
-        : path.join(cwd, expanded);
-
-    return path.normalize(absolute);
-}
-
-async function resolveExistingPath(filePath: string, context: HandlerContext): Promise<string> {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-
-    const absoluteCandidate = resolveFilePath(filePath, cwd);
-    if (await pathExists(absoluteCandidate)) {
-        return absoluteCandidate;
-    }
-
-    const matches = await findFiles(filePath, context);
-    if (matches.length > 0) {
-        const candidate = matches[0].path;
-        const absolute = resolveFilePath(candidate, cwd);
-        if (await pathExists(absolute)) {
-            return absolute;
-        }
-    }
-
-    return absoluteCandidate;
-}
-
-async function pathExists(target: string): Promise<boolean> {
-    try {
-        await fs.promises.access(target, fs.constants.F_OK);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function findFiles(pattern: string | undefined, context: HandlerContext): Promise<ListFilesResponse["files"]> {
-    const { logService } = context;
-
-    if (!pattern || !pattern.trim()) {
-        return [];
-    }
-
-    try {
-        // 先用 ripgrep 获取文件结果
-        const fileResults = await findFilesWithRipgrep(pattern, context);
-
-        // 从 pattern 推断锚点目录及最后一个查询 token
-        const anchorInfo = parseAnchorFromPattern(pattern, context);
-        const dirResults: ListFilesResponse["files"] = [];
-
-        // B) 若存在锚点目录，列出其子目录（体验更好）
-        if (anchorInfo?.anchorAbs) {
-            const childDirs = await collectChildDirs(anchorInfo.anchorAbs, anchorInfo.lastToken, context);
-            childDirs.sort((a, b) => a.name.localeCompare(b.name))
-            dirResults.push(...childDirs);
-        }
-
-        // A) 由文件结果推导父目录（仅保留名称匹配 token 的目录以减少噪声）
-        const derived = deriveParentDirsFromFiles(fileResults, context, anchorInfo.lastToken);
-        dirResults.push(...derived);
-
-        // 合并并去重（目录唯一按 path）
-        const seen = new Set<string>();
-        const dirMerged: ListFilesResponse["files"] = [];
-        for (const d of dirResults) {
-            if (d && d.type === 'directory' && !seen.has(d.path)) {
-                seen.add(d.path);
-                dirMerged.push(d);
-            }
-        }
-
-        // 合并顺序：有锚点 → 目录在前，文件在后；无锚点 → 先文件，后目录
-        const merged: ListFilesResponse["files"] = [];
-        if (anchorInfo.anchorAbs) {
-            merged.push(...dirMerged, ...fileResults);
-        } else {
-            merged.push(...fileResults, ...dirMerged);
-        }
-        if (merged.length > 200) merged.length = 200
-        return merged;
-    } catch (error) {
-        logService.warn(`[findFiles] ripgrep failed, falling back: ${error instanceof Error ? error.message : String(error)}`);
-        // fallback 同样合并目录
-        const fileResults = await findFilesWithWorkspaceSearch(pattern, context);
-        const anchorInfo = parseAnchorFromPattern(pattern, context);
-        const dirResults: ListFilesResponse["files"] = [];
-        if (anchorInfo?.anchorAbs) {
-            const childDirs = await collectChildDirs(anchorInfo.anchorAbs, anchorInfo.lastToken, context);
-            childDirs.sort((a, b) => a.name.localeCompare(b.name))
-            dirResults.push(...childDirs);
-        }
-        dirResults.push(...deriveParentDirsFromFiles(fileResults, context, anchorInfo.lastToken));
-        const seen = new Set<string>();
-        const dirMerged: ListFilesResponse["files"] = [];
-        for (const d of dirResults) {
-            if (d && d.type === 'directory' && !seen.has(d.path)) {
-                seen.add(d.path);
-                dirMerged.push(d);
-            }
-        }
-        const merged: ListFilesResponse["files"] = [];
-        if (anchorInfo.anchorAbs) {
-            merged.push(...dirMerged, ...fileResults);
-        } else {
-            merged.push(...fileResults, ...dirMerged);
-        }
-        if (merged.length > 200) merged.length = 200
-        return merged;
-    }
-}
-
-async function findFilesWithWorkspaceSearch(
-    pattern: string,
-    context: HandlerContext
-): Promise<ListFilesResponse["files"]> {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-
-    const include = pattern.includes("*") || pattern.includes("?")
-        ? pattern
-        : `**/${pattern}`;
-
-    const excludePatterns = buildExcludePatterns();
-    const excludeGlob = toExcludeGlob(excludePatterns);
-
-    let uris: vscode.Uri[];
-    try {
-        uris = await vscode.workspace.findFiles(include, excludeGlob, 200);
-    } catch {
-        const fallbackGlob = toExcludeGlob(Array.from(DEFAULT_EXCLUDE_PATTERNS));
-        uris = await vscode.workspace.findFiles(include, fallbackGlob, 200);
-    }
-
-    const results: ListFilesResponse["files"] = [];
-    for (const uri of uris) {
-        const fsPath = uri.fsPath;
-        let type: "file" | "directory" = "file";
-        try {
-            const stat = await fs.promises.stat(fsPath);
-            if (stat.isDirectory()) {
-                type = "directory";
-            }
-        } catch {
-            // ignore stat errors, default to file
-        }
-
-        const relative = toWorkspaceRelative(fsPath, cwd);
-        results.push({
-            path: relative,
-            name: path.basename(fsPath),
-            type
-        });
-    }
-
-    return results;
-}
-
-async function findFilesWithRipgrep(
-    pattern: string,
-    context: HandlerContext
-): Promise<ListFilesResponse["files"]> {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-
-    const args = ["--files", "--follow", "--hidden"];
-    const excludePatterns = buildExcludePatterns();
-    for (const glob of excludePatterns) {
-        args.push("--glob", `!${glob}`);
-    }
-
-    const rawPaths = await execRipgrep(args, cwd, context);
-    const prioritized = prioritizeRipgrepResults(rawPaths, pattern, cwd);
-
-    const results: ListFilesResponse["files"] = [];
-    for (const entry of prioritized) {
-        let type: "file" | "directory" = "file";
-        try {
-            const stat = await fs.promises.stat(entry.absolute);
-            if (stat.isDirectory()) {
-                type = "directory";
-            }
-        } catch {
-            // ignore stat errors
-        }
-
-        results.push({
-            path: entry.relative,
-            name: path.basename(entry.absolute),
-            type
-        });
-    }
-
-    return results;
-}
-
-// 从查询 pattern 解析锚点目录与最后 token（如 'src/com' => anchor: 'src', lastToken: 'com'）
-function parseAnchorFromPattern(pattern: string, context: HandlerContext): { anchorAbs?: string; lastToken: string } {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-    const p = pattern.trim();
-    const idx = p.lastIndexOf('/')
-    if (idx > 0) {
-        const anchor = p.slice(0, idx);
-        const lastToken = p.slice(idx + 1);
-        const anchorAbs = normalizeAbsolutePath(anchor, cwd);
-        return { anchorAbs, lastToken };
-    } else {
-        // 无锚点，仅返回最后 token（整体作为 token）
-        return { lastToken: p };
-    }
-}
-
-// 由文件结果推导父目录列表
-function deriveParentDirsFromFiles(
-    files: ListFilesResponse["files"],
-    context: HandlerContext,
-    token?: string
-): ListFilesResponse["files"] {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-    const dirSet = new Set<string>();
-    for (const f of files) {
-        try {
-            const rel = f.path || '';
-            const abs = normalizeAbsolutePath(rel, cwd);
-            const parent = path.dirname(abs);
-            const relParent = toWorkspaceRelative(parent, cwd);
-            if (relParent && !dirSet.has(relParent)) {
-                dirSet.add(relParent);
-            }
-        } catch {}
-    }
-    const results: ListFilesResponse["files"] = [];
-    // 排序稳定
-    const sorted = Array.from(dirSet).sort((a, b) => a.localeCompare(b))
-    let count = 0;
-    const t = (token || '').toLowerCase()
-    for (const rel of sorted) {
-        // 无锚点时，仅输出名称包含 token 的目录，减少噪声
-        if (t && !path.basename(rel).toLowerCase().includes(t)) continue;
-        results.push({ path: rel, name: path.basename(rel), type: 'directory' });
-        if (++count >= 200) break;
-    }
-    return results;
-}
-
-// 列出锚点目录下的子目录，按 lastToken 过滤
-async function collectChildDirs(anchorAbs: string, lastToken: string, context: HandlerContext): Promise<ListFilesResponse["files"]> {
-    const { workspaceService } = context;
-    const cwd = workspaceService.getDefaultWorkspaceFolder()?.uri.fsPath || process.cwd();
-    const uri = vscode.Uri.file(anchorAbs);
-    let entries: [string, vscode.FileType][] = [];
-    try {
-        entries = await vscode.workspace.fs.readDirectory(uri);
-    } catch {
-        return [];
-    }
-    const lower = (lastToken || '').toLowerCase();
-    const results: ListFilesResponse["files"] = [];
-    for (const [name, type] of entries) {
-        if (type !== vscode.FileType.Directory) continue;
-        if (lower && !name.toLowerCase().includes(lower)) continue;
-        const abs = path.join(anchorAbs, name);
-        const rel = toWorkspaceRelative(abs, cwd);
-        results.push({ path: rel, name, type: 'directory' });
-        if (results.length >= 200) break;
-    }
-    return results;
-}
-
-function buildExcludePatterns(): string[] {
-    const patterns = new Set<string>(DEFAULT_EXCLUDE_PATTERNS);
-
-    try {
-        const searchConfig = vscode.workspace.getConfiguration("search");
-        const filesConfig = vscode.workspace.getConfiguration("files");
-        const searchExclude = (searchConfig.get<Record<string, boolean>>("exclude") ?? {});
-        const filesExclude = (filesConfig.get<Record<string, boolean>>("exclude") ?? {});
-
-        for (const [glob, enabled] of Object.entries(searchExclude)) {
-            if (enabled && typeof glob === "string" && glob.length > 0) {
-                patterns.add(glob);
-            }
-        }
-
-        for (const [glob, enabled] of Object.entries(filesExclude)) {
-            if (enabled && typeof glob === "string" && glob.length > 0) {
-                patterns.add(glob);
-            }
-        }
-
-        const useIgnoreFiles = searchConfig.get<boolean>("useIgnoreFiles", true);
-        if (useIgnoreFiles) {
-            const folders = vscode.workspace.workspaceFolders;
-            if (folders) {
-                for (const folder of folders) {
-                    for (const entry of readGitignorePatterns(folder.uri.fsPath)) {
-                        patterns.add(entry);
-                    }
-                }
-            }
-            for (const entry of readGlobalGitignorePatterns()) {
-                patterns.add(entry);
-            }
-        }
-    } catch (error) {
-        // ignore errors
-    }
-
-    return Array.from(patterns);
-}
-
-function readGitignorePatterns(root: string): string[] {
-    const entries: string[] = [];
-    const localGitignore = path.join(root, ".gitignore");
-    try {
-        if (fs.existsSync(localGitignore)) {
-            const content = fs.readFileSync(localGitignore, "utf8");
-            entries.push(...parseGitignore(content));
-        }
-    } catch {
-        // ignore errors
-    }
-    return entries;
-}
-
-function readGlobalGitignorePatterns(): string[] {
-    const entries: string[] = [];
-    const globalGitIgnore = path.join(os.homedir(), ".config", "git", "ignore");
-    try {
-        if (fs.existsSync(globalGitIgnore)) {
-            const content = fs.readFileSync(globalGitIgnore, "utf8");
-            entries.push(...parseGitignore(content));
-        }
-    } catch {
-        // ignore errors
-    }
-    return entries;
-}
-
-function parseGitignore(content: string): string[] {
-    const results: string[] = [];
-    for (const rawLine of content.split(/\r?\n/)) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith("#") || line.startsWith("!")) {
-            continue;
-        }
-
-        let transformed = line;
-        if (transformed.endsWith("/")) {
-            transformed = `${transformed.slice(0, -1)}/**`;
-        }
-        if (transformed.startsWith("/")) {
-            transformed = transformed.slice(1);
-        } else {
-            transformed = `**/${transformed}`;
-        }
-        results.push(transformed);
-    }
-    return results;
-}
-
-function toExcludeGlob(patterns: string[]): string | undefined {
-    if (patterns.length === 0) {
-        return undefined;
-    }
-    if (patterns.length === 1) {
-        return patterns[0];
-    }
-    return `{${patterns.join(",")}}`;
-}
-
-function prioritizeRipgrepResults(
-    paths: string[],
-    pattern: string,
-    cwd: string
-): Array<{ absolute: string; relative: string }> {
-    const cleaned = paths.filter(Boolean);
-    const normalizedPattern = pattern.trim().toLowerCase();
-
-    const scored = cleaned.map((raw, index) => {
-        const absolute = normalizeAbsolutePath(raw.replace(/^\.\//, ""), cwd);
-        const relative = toWorkspaceRelative(absolute, cwd);
-        const lowerRelative = relative.toLowerCase();
-        const lowerName = path.basename(relative).toLowerCase();
-        let score = Number.MAX_SAFE_INTEGER;
-        let matched = true;
-        if (normalizedPattern.length > 0) {
-            const pathIndex = lowerRelative.indexOf(normalizedPattern);
-            const nameIndex = lowerName.indexOf(normalizedPattern);
-            matched = pathIndex >= 0 || nameIndex >= 0;
-            if (pathIndex >= 0) score = Math.min(score, pathIndex);
-            if (nameIndex >= 0) score = Math.min(score, nameIndex / 2);
-        } else {
-            score = index;
-        }
-
-        if (!matched) return null as any; // 将未匹配项过滤掉
-
-        const penalty = lowerRelative.includes("test") ? 1 : 0;
-        return { absolute, relative, score, penalty };
-    });
-    const filtered = scored.filter(Boolean) as Array<{ absolute: string; relative: string; score: number; penalty: number }>;
-    if (normalizedPattern.length > 0 && filtered.length === 0) {
-        // 无匹配，直接返回空
-        return [];
-    }
-
-    filtered.sort((a, b) => {
-        if (a.score === b.score) {
-            if (a.penalty !== b.penalty) {
-                return a.penalty - b.penalty;
-            }
-            return a.relative.localeCompare(b.relative);
-        }
-        return a.score - b.score;
-    });
-
-    return filtered.slice(0, 200).map((entry) => ({
-        absolute: entry.absolute,
-        relative: entry.relative
-    }));
-}
-
-function normalizeAbsolutePath(target: string, cwd: string): string {
-    if (path.isAbsolute(target)) {
-        return path.normalize(target);
-    }
-    return path.normalize(path.join(cwd, target));
-}
-
-function toWorkspaceRelative(absolutePath: string, cwd: string): string {
-    const relative = path.relative(cwd, absolutePath);
-    if (relative && !relative.startsWith("..")) {
-        return relative;
-    }
-    return absolutePath;
-}
-
-let ripgrepCommandCache: { command: string; args: string[] } | undefined;
-
-function getRipgrepCommand(): { command: string; args: string[] } {
-    if (ripgrepCommandCache) {
-        return ripgrepCommandCache;
-    }
-
-    const rootDir = path.resolve(__dirname, "..", "..", "..", "..");
-    const vendorDir = path.join(rootDir, "vendor", "ripgrep");
-
-    let command: string;
-    if (process.platform === "win32") {
-        command = path.join(vendorDir, "x64-win32", "rg.exe");
-    } else {
-        const platformKey = `${process.arch}-${process.platform}`;
-        command = path.join(vendorDir, platformKey, "rg");
-    }
-
-    if (!fs.existsSync(command)) {
-        command = "rg";
-    }
-
-    ripgrepCommandCache = { command, args: [] };
-    return ripgrepCommandCache;
-}
-
-async function execRipgrep(
-    args: string[],
-    cwd: string,
-    context: HandlerContext
-): Promise<string[]> {
-    const { logService } = context;
-    const { command, args: defaultArgs } = getRipgrepCommand();
-
-    return new Promise((resolve, reject) => {
-        execFile(command, [...defaultArgs, ...args], {
-            cwd,
-            maxBuffer: 32 * 1024 * 1024,
-            timeout: 15_000
-        }, (error, stdout, stderr) => {
-            if (!error) {
-                resolve(stdout.split(/\r?\n/).filter(Boolean));
-                return;
-            }
-
-            const code = (error as any)?.code;
-            const signal = (error as any)?.signal;
-            if (code === 1) {
-                resolve([]);
-                return;
-            }
-
-            if ((signal === "SIGTERM" || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") && stdout) {
-                resolve(stdout.split(/\r?\n/).filter(Boolean));
-                return;
-            }
-
-            logService.warn(`[findFiles] ripgrep error: ${stderr || (error instanceof Error ? error.message : String(error))}`);
-            reject(error);
-        });
-    });
-}
-
-function sanitizeFileName(fileName: string): string {
-    const fallback = fileName && fileName.trim() ? fileName.trim() : "claude.txt";
-    return fallback.replace(/[<>:\"/\\|?*\x00-\x1F]/g, "_");
-}
-
-async function createTempFile(fileName: string, content: string): Promise<string> {
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "claude-"));
-    const sanitized = sanitizeFileName(fileName);
-    const filePath = path.join(tempDir, sanitized);
-    await fs.promises.writeFile(filePath, content, "utf8");
-    return filePath;
-}
-
 async function prepareDiffRightFile(
     originalPath: string,
     fallbackPath: string | undefined,
-    edits: OpenDiffRequest["edits"]
+    edits: OpenDiffRequest["edits"],
+    context: HandlerContext
 ): Promise<string> {
     let baseContent = "";
 
-    if (await pathExists(originalPath)) {
+    if (await context.fileSystemService.pathExists(originalPath)) {
         baseContent = await fs.promises.readFile(originalPath, "utf8");
-    } else if (fallbackPath && await pathExists(fallbackPath)) {
+    } else if (fallbackPath && await context.fileSystemService.pathExists(fallbackPath)) {
         baseContent = await fs.promises.readFile(fallbackPath, "utf8");
     }
 
@@ -1322,7 +816,7 @@ async function prepareDiffRightFile(
     const baseName = path.basename(fallbackPath || originalPath || "claude.diff");
     const outputName = baseName.endsWith(".claude") ? baseName : `${baseName}.claude`;
 
-    return createTempFile(outputName, modified);
+    return context.fileSystemService.createTempFile(outputName, modified);
 }
 
 async function waitForDocumentEdits(

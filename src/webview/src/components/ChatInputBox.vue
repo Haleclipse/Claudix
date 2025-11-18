@@ -34,6 +34,8 @@
       @input="handleInput"
       @keydown="handleKeydown"
       @paste="handlePaste"
+      @dragover="handleDragOver"
+      @drop="handleDrop"
     />
 
     <!-- 第二行：ButtonArea 组件 + TokenIndicator -->
@@ -202,7 +204,7 @@ const isSubmitDisabled = computed(() => {
 const slashCompletion = useCompletionDropdown({
   mode: 'inline',
   trigger: '/',
-  provider: (query) => getSlashCommands(query, runtime),
+  provider: (query, signal) => getSlashCommands(query, runtime, signal),
   toDropdownItem: commandToDropdownItem,
   onSelect: (command, query) => {
     if (query) {
@@ -227,7 +229,7 @@ const slashCompletion = useCompletionDropdown({
 const fileCompletion = useCompletionDropdown({
   mode: 'inline',
   trigger: '@',
-  provider: (query) => getFileReferences(query, runtime),
+  provider: (query, signal) => getFileReferences(query, runtime, signal),
   toDropdownItem: fileToDropdownItem,
   onSelect: (file, query) => {
     if (query) {
@@ -411,6 +413,10 @@ function handleKeydown(event: KeyboardEvent) {
 
   // 其他按键处理
   if (event.key === 'Enter' && !event.shiftKey) {
+    // 检查是否正在输入法组合状态(中文输入法等)
+    if (event.isComposing) {
+      return
+    }
     event.preventDefault()
     handleSubmit()
   }
@@ -459,6 +465,184 @@ function handlePaste(event: ClipboardEvent) {
     // 触发附件添加
     handleAddFiles(dataTransfer.files)
   }
+}
+
+function getWorkspaceRoot(): string | undefined {
+  const r = runtime as any
+  if (!r) return undefined
+
+  try {
+    const sessionStore = r.sessionStore
+    const activeSession = sessionStore?.activeSession?.()
+    const cwdFromSession = activeSession?.cwd?.()
+    if (typeof cwdFromSession === 'string' && cwdFromSession) {
+      return cwdFromSession
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const connection = r.connectionManager?.connection?.()
+    const config = connection?.config?.()
+    if (config?.defaultCwd && typeof config.defaultCwd === 'string') {
+      return config.defaultCwd
+    }
+  } catch {
+    // ignore
+  }
+
+  return undefined
+}
+
+function toWorkspaceRelativePath(absoluteOrMixedPath: string): string {
+  const root = getWorkspaceRoot()
+  if (!root) return absoluteOrMixedPath
+
+  const normRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
+  let normPath = absoluteOrMixedPath.replace(/\\/g, '/')
+
+  // 处理 Windows 上 file:// URI 转换后形如 /C:/ 的情况
+  if (normPath.startsWith('/') && /^[A-Za-z]:\//.test(normPath.slice(1))) {
+    normPath = normPath.slice(1)
+  }
+
+  if (normPath === normRoot) {
+    return ''
+  }
+
+  if (normPath.startsWith(normRoot + '/')) {
+    return normPath.slice(normRoot.length + 1)
+  }
+
+  return absoluteOrMixedPath
+}
+
+function isFileDrop(event: DragEvent): boolean {
+  const dataTransfer = event.dataTransfer
+  if (!dataTransfer) return false
+
+  const types = Array.from(dataTransfer.types || [])
+  if (types.includes('Files')) return true
+  if (types.includes('text/uri-list')) return true
+
+  return false
+}
+
+function extractFilePathsFromDataTransfer(dataTransfer: DataTransfer): string[] {
+  const paths: string[] = []
+
+  const uriList = dataTransfer.getData('text/uri-list')
+  if (uriList) {
+    const lines = uriList
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#'))
+
+    for (const line of lines) {
+      try {
+        const url = new URL(line)
+        if (url.protocol === 'file:') {
+          const decodedPath = decodeURIComponent(url.pathname)
+          paths.push(toWorkspaceRelativePath(decodedPath))
+        } else {
+          paths.push(toWorkspaceRelativePath(line))
+        }
+      } catch {
+        paths.push(toWorkspaceRelativePath(line))
+      }
+    }
+  }
+
+  if (paths.length === 0 && dataTransfer.files && dataTransfer.files.length > 0) {
+    for (const file of Array.from(dataTransfer.files)) {
+      const fileWithPath = file as File & { path?: string }
+      if (fileWithPath.path) {
+        paths.push(toWorkspaceRelativePath(fileWithPath.path))
+      } else {
+        paths.push(toWorkspaceRelativePath(file.name))
+      }
+    }
+  }
+
+  return paths
+}
+
+async function statPaths(
+  paths: string[]
+): Promise<Record<string, 'file' | 'directory' | 'other' | 'not_found'>> {
+  const result: Record<string, 'file' | 'directory' | 'other' | 'not_found'> = {}
+  if (!paths.length) return result
+
+  const r = runtime as any
+  if (!r) return result
+
+  try {
+    const connection = await r.connectionManager.get()
+    const response = await connection.statPaths(paths)
+    const entries = (response?.entries ?? []) as Array<{ path: string; type: any }>
+    for (const entry of entries) {
+      if (!entry || typeof entry.path !== 'string') continue
+      const t = entry.type
+      if (t === 'file' || t === 'directory' || t === 'other' || t === 'not_found') {
+        result[entry.path] = t
+      }
+    }
+  } catch (error) {
+    console.warn('[ChatInputBox] statPaths failed:', error)
+  }
+
+  return result
+}
+
+function handleDragOver(event: DragEvent) {
+  // 仅在按住 Shift 且为文件/URI 拖拽时拦截，避免干扰普通文本拖拽
+  if (!event.shiftKey) return
+  if (!isFileDrop(event)) return
+
+  event.preventDefault()
+}
+
+async function handleDrop(event: DragEvent) {
+  const dataTransfer = event.dataTransfer
+  if (!dataTransfer) return
+
+  // 按住 Shift 时，将资源管理器文件拖入视为“插入路径”
+  if (!event.shiftKey) return
+  if (!isFileDrop(event)) return
+
+  event.preventDefault()
+
+  const paths = extractFilePathsFromDataTransfer(dataTransfer)
+  if (paths.length === 0) return
+
+  const types = await statPaths(paths)
+
+  const mentionText = paths
+    .map(p => {
+      const t = types[p]
+      const isDir = t === 'directory'
+      const normalized = isDir && !p.endsWith('/') ? `${p}/` : p
+      return `@${normalized}`
+    })
+    .join(' ')
+
+  const baseContent = content.value.trimEnd()
+  const updatedContent = baseContent ? `${baseContent} ${mentionText} ` : `${mentionText} `
+
+  content.value = updatedContent
+
+  if (textareaRef.value) {
+    textareaRef.value.textContent = updatedContent
+    placeCaretAtEnd(textareaRef.value)
+  }
+
+  emit('input', updatedContent)
+  autoResizeTextarea()
+
+  nextTick(() => {
+    textareaRef.value?.focus()
+  })
 }
 
 function handleSubmit() {
@@ -513,23 +697,21 @@ function handleRemoveAttachment(id: string) {
   emit('removeAttachment', id)
 }
 
-// 监听光标位置变化
+// 监听光标位置变化（仅在下拉菜单已打开时更新位置，避免重复触发请求）
 function handleSelectionChange() {
-  if (content.value && textareaRef.value) {
-    slashCompletion.evaluateQuery(content.value)
-    fileCompletion.evaluateQuery(content.value)
+  if (!content.value || !textareaRef.value) return
 
-    // 更新 dropdown 位置
-    if (slashCompletion.isOpen.value) {
-      nextTick(() => {
-        updateDropdownPosition(slashCompletion, 'queryStart')
-      })
-    }
-    if (fileCompletion.isOpen.value) {
-      nextTick(() => {
-        updateDropdownPosition(fileCompletion, 'queryStart')
-      })
-    }
+  // 仅在下拉菜单已打开时更新位置
+  // 避免重复调用 evaluateQuery（已在 handleInput 中调用）
+  if (slashCompletion.isOpen.value) {
+    nextTick(() => {
+      updateDropdownPosition(slashCompletion, 'queryStart')
+    })
+  }
+  if (fileCompletion.isOpen.value) {
+    nextTick(() => {
+      updateDropdownPosition(fileCompletion, 'queryStart')
+    })
   }
 }
 

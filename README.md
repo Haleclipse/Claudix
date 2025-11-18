@@ -109,3 +109,7 @@ Contributions are welcome! If you would like to contribute to this project, plea
 ## License
 
 AGPL-3.0
+
+## Star History
+
+[![Star History](https://api.star-history.com/svg?repos=Haleclipse/Claudix&type=date&legend=top-left)](https://www.star-history.com/#Haleclipse/Claudix&type=date&legend=top-left)
