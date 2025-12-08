@@ -3,7 +3,7 @@
     class="progress-container"
     :style="containerStyle"
   >
-    <span class="progress-text">{{ formattedPercentage }}</span>
+    <span class="progress-text" data-responsive="hide-small">{{ formattedPercentage }}</span>
     <div class="progress-circle">
       <svg width="14" height="14" class="progress-svg">
         <circle

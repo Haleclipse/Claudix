@@ -136,7 +136,7 @@ function toggleExpand() {
 .tool-message-wrapper {
   display: flex;
   flex-direction: column;
-  padding: 0px 8px;
+  padding: 0px;
 }
 
 .main-line {

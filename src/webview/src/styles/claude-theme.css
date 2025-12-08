@@ -74,6 +74,12 @@ html {
   --app-link-color: var(--vscode-textLink-foreground);
 }
 
+/* Reset body */
+body {
+  margin: 0;
+  padding: 0;
+}
+
 /* Light 主题调整 */
 .vscode-light {
   --app-transparent-inner-border: rgba(0, 0, 0, 0.07);
@@ -504,6 +510,13 @@ html {
   color: color-mix(in srgb,var(--vscode-foreground) 48%,transparent);
   flex-shrink: 0;
   gap: 4px;
+}
+
+/* 工具栏容器查询：宽度 ≤ 340px 时隐藏标记为 hide-small 的元素 */
+@container toolbar (max-width: 340px) {
+  [data-responsive="hide-small"] {
+    display: none !important;
+  }
 }
 
 

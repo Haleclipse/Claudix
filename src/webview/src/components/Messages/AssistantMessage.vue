@@ -64,7 +64,7 @@ const messageClasses = computed(() => {
   left: 8px;
   padding-top: 2px;
   font-size: 10px;
-  color: var(--vscode-input-border);
+  color: color-mix(in srgb, var(--vscode-foreground) 60%, transparent);
   z-index: 1;
 }
 </style>
