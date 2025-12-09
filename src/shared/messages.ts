@@ -127,6 +127,7 @@ export interface InitResponse {
         modelSetting: string;
         platform: string;
         thinkingLevel?: string;        // Thinking 等级（off | default_on）
+        initialPermissionMode?: PermissionMode;
     };
 }
 

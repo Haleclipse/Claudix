@@ -64,6 +64,7 @@ export abstract class BaseTransport {
       modelSetting: initResponse.state.modelSetting,
       platform: initResponse.state.platform,
       thinkingLevel: initResponse.state.thinkingLevel,
+      initialPermissionMode: initResponse.state.initialPermissionMode,
     } as InitResponse["state"]);
 
     const claudeState = await this.sendRequest<GetClaudeStateResponse>({

@@ -47,6 +47,17 @@
           },
           "default": [],
           "description": "Environment variables to set when launching Claude"
+        },
+        "claudix.initialPermissionMode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "plan",
+            "bypassPermissions"
+          ],
+          "default": "default",
+          "description": "Default permission mode for new Claude sessions. WARNING: 'bypassPermissions' will allow Claude to run tools and apply edits without asking for confirmation."
         }
       }
     },

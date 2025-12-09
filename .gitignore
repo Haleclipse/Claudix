@@ -24,6 +24,7 @@ Thumbs.db
 pnpm-lock.yaml
 records/**
 .claude/**
+.augment/**
 
 # Documentation
 CLAUDE.md
