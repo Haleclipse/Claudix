@@ -151,5 +151,6 @@
     "type": "git",
     "url": "https://github.com/Haleclipse/Claudix"
   },
-  "license": "AGPL-3.0"
+  "license": "AGPL-3.0",
+  "packageManager": "pnpm@9.12.1+sha1.7084e7df42ee1d221994c2c2599277a2a937f050"
 }

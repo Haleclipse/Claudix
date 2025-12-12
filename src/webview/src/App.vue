@@ -2,25 +2,10 @@
   <div class="app-wrapper">
     <main class="app-main">
       <div class="page-container">
-        <Motion
-          :animate="pageAnimation"
-          :transition="{ duration: 0.3, ease: 'easeOut' }"
-          class="motion-wrapper"
-        >
-          <SessionsPage
-            v-if="currentPage === 'sessions'"
-            key="sessions"
-            @switch-to-chat="handleSwitchToChat"
-          />
-          <ChatPage
-            v-else-if="currentPage === 'chat'"
-            key="chat"
-            @switch-to-sessions="switchToPage('sessions')"
-          />
-          <SettingsPage
-            v-else-if="currentPage === 'settings'"
-            key="settings"
-          />
+        <Motion :animate="pageAnimation" :transition="{ duration: 0.3, ease: 'easeOut' }" class="motion-wrapper">
+          <SessionsPage v-if="currentPage === 'sessions'" key="sessions" @switch-to-chat="handleSwitchToChat" />
+          <ChatPage v-else-if="currentPage === 'chat'" key="chat" @switch-to-sessions="switchToPage('sessions')" />
+          <SettingsPage v-else-if="currentPage === 'settings'" key="settings" />
           <!-- IconTestPage -->
           <!-- <IconTestPage
             v-else-if="currentPage === 'icontest'"
@@ -36,7 +21,7 @@
 import { ref, onMounted, provide } from 'vue';
 import { Motion } from 'motion-v';
 import SessionsPage from './pages/SessionsPage.vue';
-import ChatPage from './pages/ChatPage.vue';
+import ChatPage from './pages/ChatPage/index.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import './styles/claude-theme.css';
 import { useRuntime } from './composables/useRuntime';
