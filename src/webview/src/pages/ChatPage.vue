@@ -59,6 +59,10 @@
             :on-resolve="handleResolvePermission"
             data-permission-panel="1"
           />
+          <div v-if="selectionInfo" class="selection-indicator">
+            <span class="codicon codicon-note selection-indicator-icon"></span>
+            <span class="selection-indicator-text">{{ selectionInfo }}</span>
+          </div>
           <ChatInputBox
             :show-progress="true"
             :progress-percentage="progressPercentage"
@@ -142,6 +146,18 @@
   const permissionRequestsLen = computed(() => permissionRequests.value.length);
   const pendingPermission = computed(() => permissionRequests.value[0] as any);
   const platform = computed(() => runtime.appContext.platform);
+  const selectionInfo = computed(() => {
+    const sel = session.value?.selection.value;
+    if (!sel?.filePath) return '';
+    const fileName = sel.filePath.split(/[\\/]/).pop() || sel.filePath;
+    const start = sel.startLine;
+    const end = sel.endLine ?? sel.startLine;
+    if (start && end) {
+      const lineCount = Math.max(1, end - start + 1);
+      return `${fileName} #${start}-${end} (${lineCount} 行)`;
+    }
+    return fileName;
+  });
 
   // 注册命令：permissionMode.toggle（在下方定义函数后再注册）
 
@@ -515,7 +531,45 @@
 
   /* 输入区域容器 */
   .inputContainer {
+    position: relative;
     padding: 8px 12px 12px;
+  }
+
+  .selection-indicator {
+    position: absolute;
+    bottom: 100%;
+    left: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 4px 8px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-textLink-foreground);
+    font-size: 11px;
+    line-height: 1.4;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+    z-index: 10;
+  }
+
+  .selection-indicator-icon {
+    font-size: 12px;
+  }
+
+  .selection-indicator-text {
+    font-family: var(
+      --app-monospace-font-family,
+      ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Monaco,
+      Consolas,
+      'Liberation Mono',
+      'Courier New',
+      monospace
+    );
   }
 
   /* 底部对话框区域钉在底部 */

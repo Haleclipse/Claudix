@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, watch } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import { signal, effect } from 'alien-signals';
 import { EventEmitter } from '../utils/events';
 import { ConnectionManager } from '../core/ConnectionManager';
@@ -23,18 +23,13 @@ export function useRuntime(): RuntimeInstance {
   const appContext = new AppContext(connectionManager);
 
   // 创建 alien-signal 用于 SessionContext
-  // AppContext.currentSelection 是 Vue Ref，但 SessionContext 需要 alien-signal
+  // AppContext.currentSelection 是 alien-signal，SessionContext 也需要 alien-signal
   const currentSelectionSignal = signal<SelectionRange | undefined>(undefined);
 
-  // 双向同步 Vue Ref ↔ Alien Signal
-  // Vue Ref → Alien Signal
-  watch(
-    () => appContext.currentSelection(),
-    (newValue) => {
-      currentSelectionSignal(newValue);
-    },
-    { immediate: true }
-  );
+  // 使用 alien-signals 的 effect 同步信号（Vue watch 无法追踪 alien-signal）
+  const cleanupSelectionSync = effect(() => {
+    currentSelectionSignal(appContext.currentSelection());
+  });
 
   const sessionStore = new SessionStore(connectionManager, {
     commandRegistry: appContext.commandRegistry,
@@ -47,7 +42,7 @@ export function useRuntime(): RuntimeInstance {
   });
 
   selectionEvents.add((selection) => {
-    appContext.currentSelection(selection);
+    appContext.currentSelection(selection ?? undefined);
   });
 
   // SessionStore 内部的 effect 会自动监听 connection 建立并拉取会话列表
@@ -122,6 +117,7 @@ export function useRuntime(): RuntimeInstance {
       // 清理命令注册
       slashCommandDisposers.forEach(dispose => dispose());
       cleanupSlashCommands();
+      cleanupSelectionSync();
 
       connectionManager.close();
     });

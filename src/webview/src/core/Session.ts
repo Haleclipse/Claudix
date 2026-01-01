@@ -196,7 +196,7 @@ export class Session {
   async send(
     input: string,
     attachments: AttachmentPayload[] = [],
-    includeSelection = false
+    includeSelection = true
   ): Promise<void> {
     const connection = await this.getConnection();
 
@@ -206,6 +206,15 @@ export class Session {
 
     // 启动 channel（确保已带上当前 thinkingLevel）
     await this.launchClaude();
+
+    if (includeSelection && !isSlash) {
+      try {
+        const selection = await connection.getCurrentSelection();
+        this.selection(selection?.selection ?? undefined);
+      } catch (error) {
+        console.warn('[Session] Failed to fetch current selection', error);
+      }
+    }
 
     const shouldIncludeSelection = includeSelection && !isSlash;
     let selectionPayload: SelectionRange | undefined;
