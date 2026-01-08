@@ -1,23 +1,28 @@
 /**
- * Message - 消息类
+ * Message - Message class
  *
- * 核心功能：
- * 1. 包装消息数据
- * 2. 提供 isEmpty getter（动态计算）
- * 3. 支持 ContentBlockWrapper 响应式 tool_result 关联
+ * Core features:
+ * 1. Wraps message data
+ * 2. Provides isEmpty getter (dynamically computed)
+ * 3. Supports ContentBlockWrapper reactive tool_result binding
+ * 4. Supports streaming mode with isStreaming signal
+ *
+ * CLEANUP CONTRACT:
+ * - disposeStreaming() MUST be called when streaming completes
  */
 
+import { signal } from 'alien-signals';
 import type { ContentBlockType } from '../models/ContentBlock';
 import { parseMessageContent } from '../models/contentParsers';
 import { ContentBlockWrapper } from '../models/ContentBlockWrapper';
 
 /**
- * 消息类型
+ * Message role types
  */
 export type MessageRole = 'user' | 'assistant' | 'system' | 'result' | 'tip' | 'slash_command_result';
 
 /**
- * 消息内容数据
+ * Message content data
  */
 export interface MessageData {
   role: MessageRole;
@@ -25,21 +30,41 @@ export interface MessageData {
 }
 
 /**
- * 消息类
+ * Message class
  *
- * 对应原版逻辑：
- * - user/assistant 消息：content 是 ContentBlockWrapper[]
- * - system/result 消息：content 是 string
+ * Corresponding logic:
+ * - user/assistant messages: content is ContentBlockWrapper[]
+ * - system/result messages: content is string
  */
 export class Message {
   type: MessageRole;
   message: MessageData;
   timestamp: number;
 
-  // 额外字段（用于 system 和 result 消息）
+  // Extra fields (for system and result messages)
   subtype?: string;
   session_id?: string;
   is_error?: boolean;
+
+  // Streaming support
+  parentToolUseId?: string | null;
+
+  /**
+   * Streaming state signal (reactive)
+   * True when message is actively streaming
+   */
+  private readonly streamingSignal = signal<boolean>(false);
+
+  /**
+   * Interrupted state signal (reactive)
+   * True when stream was interrupted
+   */
+  private readonly interruptedSignal = signal<boolean>(false);
+
+  /**
+   * Error message (if stream errored)
+   */
+  private errorMessage?: string;
 
   constructor(
     type: MessageRole,
@@ -49,6 +74,7 @@ export class Message {
       subtype?: string;
       session_id?: string;
       is_error?: boolean;
+      parentToolUseId?: string | null;
     }
   ) {
     this.type = type;
@@ -59,39 +85,153 @@ export class Message {
       this.subtype = extra.subtype;
       this.session_id = extra.session_id;
       this.is_error = extra.is_error;
+      this.parentToolUseId = extra.parentToolUseId;
     }
   }
 
+  // ==========================================================================
+  // Streaming Support
+  // ==========================================================================
+
   /**
-   * isEmpty getter - 判断消息是否为"空"
+   * Get streaming state signal for reactive consumption
    *
-   * 判断逻辑：
-   * 1. system 消息永远不是 empty
-   * 2. user/assistant 消息：
-   *    - 内容为空数组 → empty
-   *    - 所有内容块都是 tool_result → empty
+   * Usage with Vue:
+   * ```typescript
+   * const isStreaming = useSignal(message.isStreaming);
+   * ```
+   */
+  get isStreaming() {
+    return this.streamingSignal;
+  }
+
+  /**
+   * Get interrupted state signal for reactive consumption
+   */
+  get isInterrupted() {
+    return this.interruptedSignal;
+  }
+
+  /**
+   * Get error message if stream errored
+   */
+  getError(): string | undefined {
+    return this.errorMessage;
+  }
+
+  /**
+   * Set streaming state
+   */
+  setStreaming(streaming: boolean): void {
+    this.streamingSignal(streaming);
+  }
+
+  /**
+   * Mark message as interrupted
+   */
+  markInterrupted(): void {
+    this.interruptedSignal(true);
+    this.streamingSignal(false);
+  }
+
+  /**
+   * Set error message
+   */
+  setError(error: string): void {
+    this.errorMessage = error;
+    this.markInterrupted();
+  }
+
+  /**
+   * Check if streaming (non-reactive)
+   */
+  getIsStreaming(): boolean {
+    return this.streamingSignal();
+  }
+
+  /**
+   * Check if interrupted (non-reactive)
+   */
+  getIsInterrupted(): boolean {
+    return this.interruptedSignal();
+  }
+
+  /**
+   * CLEANUP: Finalize streaming
+   *
+   * Finalizes all streaming content blocks and sets isStreaming to false.
+   */
+  disposeStreaming(): void {
+    const content = this.message.content;
+
+    if (Array.isArray(content)) {
+      for (const wrapper of content) {
+        if (wrapper.getIsStreaming()) {
+          wrapper.finalizeStreaming();
+        }
+      }
+    }
+
+    this.streamingSignal(false);
+  }
+
+  /**
+   * Static factory - Create a streaming message shell
+   *
+   * Used by StreamingController when message_start event arrives.
+   *
+   * @param parentToolUseId Parent tool_use ID (null for main agent)
+   * @returns Streaming Message instance
+   */
+  static createStreaming(parentToolUseId: string | null = null): Message {
+    const message = new Message(
+      'assistant',
+      {
+        role: 'assistant',
+        content: []
+      },
+      Date.now(),
+      { parentToolUseId }
+    );
+
+    message.setStreaming(true);
+    return message;
+  }
+
+  // ==========================================================================
+  // Core Functionality
+  // ==========================================================================
+
+  /**
+   * isEmpty getter - Check if message is "empty"
+   *
+   * Logic:
+   * 1. system messages are never empty
+   * 2. user/assistant messages:
+   *    - empty array → empty
+   *    - all content blocks are tool_result → empty
    */
   get isEmpty(): boolean {
-    // system 消息永远不是 empty
+    // system messages are never empty
     if (this.type === 'system') {
       return false;
     }
 
     const content = this.message.content;
 
-    // 字符串内容不会是 empty
+    // String content is empty if zero length
     if (typeof content === 'string') {
       return content.length === 0;
     }
 
-    // ContentBlockWrapper 数组
+    // ContentBlockWrapper array
     if (Array.isArray(content)) {
-      // 空数组 → empty
+      // Empty array → empty
       if (content.length === 0) {
         return true;
       }
 
-      // 所有内容块都是 tool_result → empty
+      // All content blocks are tool_result → empty
       return content.every((wrapper) => wrapper.content.type === 'tool_result');
     }
 
@@ -99,10 +239,10 @@ export class Message {
   }
 
   /**
-   * 静态工厂方法 - 从原始消息创建 Message 实例
+   * Static factory - Create Message from raw SDK message
    *
-   * @param raw 原始消息对象
-   * @returns Message 实例或 null
+   * @param raw Raw message object
+   * @returns Message instance or null
    */
   static fromRaw(raw: any): Message | null {
     if (raw.type === 'user' || raw.type === 'assistant') {
@@ -112,16 +252,16 @@ export class Message {
           ? [{ type: 'text', text: String(raw.message.content) }]
           : [];
 
-      // 解析原始 content
+      // Parse raw content
       const contentBlocks = parseMessageContent(rawContent);
 
-      // 包装为 ContentBlockWrapper
+      // Wrap as ContentBlockWrapper
       const wrappedContent = contentBlocks.map((block) => new ContentBlockWrapper(block));
 
-      // 基于 contentParsers 的解析结果判断消息类型
+      // Determine message type based on contentParsers result
       let messageType: MessageRole = raw.type;
 
-      // 检查是否为特殊消息类型
+      // Check for special message types
       if (raw.type === 'user') {
         const specialType = getSpecialMessageType(contentBlocks);
         if (specialType) {
@@ -139,23 +279,23 @@ export class Message {
       );
     }
 
-    // 不渲染 system 消息（仅用于状态更新）
+    // Don't render system messages (used for state updates only)
     if (raw.type === 'system') {
       return null;
     }
 
-    // 不渲染 result 消息（仅用于结束标志/用量统计等状态更新）
+    // Don't render result messages (used for end flag/usage stats)
     if (raw.type === 'result') {
       return null;
     }
 
-    // stream_event 等不创建消息
+    // stream_event etc don't create messages
     return null;
   }
 }
 
 /**
- * 类型守卫
+ * Type guards
  */
 export function isUserMessage(msg: Message): boolean {
   return msg.type === 'user';
@@ -174,10 +314,10 @@ export function isResultMessage(msg: Message): boolean {
 }
 
 /**
- * 获取特殊消息类型
+ * Get special message type
  *
- * 基于 contentParsers.ts 的解析结果判断
- * 返回特定的消息类型，用于分化渲染
+ * Based on contentParsers.ts parsing result
+ * Returns specific message type for differentiated rendering
  */
 function getSpecialMessageType(contentBlocks: ContentBlockType[]): MessageRole | null {
   if (contentBlocks.length === 1) {

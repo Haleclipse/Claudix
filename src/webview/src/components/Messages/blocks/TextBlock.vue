@@ -1,43 +1,44 @@
 <template>
   <div class="text-block">
-    <div :class="markdownClasses" v-html="renderedMarkdown"></div>
+    <div :class="markdownClasses">
+      <MarkdownContent :content="displayText" :final="!isStreaming" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useSignal } from '@gn8/alien-signals-vue';
+import MarkdownContent from '../MarkdownContent.vue';
 import type { TextBlock as TextBlockType } from '../../../models/ContentBlock';
+import type { ContentBlockWrapper } from '../../../models/ContentBlockWrapper';
 import type { ToolContext } from '../../../types/tool';
-import { marked } from 'marked';
-// import DOMPurify from 'dompurify'; // TODO: 安装后启用
 
 interface Props {
   block: TextBlockType;
   context?: ToolContext;
+  wrapper?: ContentBlockWrapper;
 }
 
 const props = defineProps<Props>();
 
-// Markdown 类名
+// Streaming state - reactively consumed via useSignal (consistent pattern)
+const isStreaming = props.wrapper
+  ? useSignal(props.wrapper.isStreaming)
+  : computed(() => false);
+
+// Display text - reactively consumed via useSignal (follows toolResult pattern)
+const displayText = props.wrapper
+  ? useSignal(props.wrapper.text)
+  : computed(() => props.block.text ?? '');
+
+// Markdown class names
 const markdownClasses = computed(() => {
   const classes = ['markdown-content'];
   if (props.block.isSlashCommand) {
     classes.push('slash-command-text');
   }
   return classes;
-});
-
-// 配置 marked
-marked.setOptions({
-  gfm: true,
-  breaks: true,
-});
-
-// 渲染 Markdown
-const renderedMarkdown = computed(() => {
-  const rawHtml = marked.parse(props.block.text) as string;
-  // TODO: 使用 DOMPurify.sanitize(rawHtml) 进行安全清理
-  return rawHtml;
 });
 </script>
 
@@ -60,7 +61,7 @@ const renderedMarkdown = computed(() => {
   font-weight: 600;
 }
 
-/* Markdown 基础样式 - Claudex 风格 */
+/* Markdown base styles - Claudex style */
 .markdown-content :deep(p) {
   margin: 8px 0;
   line-height: 1.6;

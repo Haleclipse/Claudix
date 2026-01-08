@@ -7,6 +7,7 @@ import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 import { processAndAttachMessage /*, mergeConsecutiveReadMessages */ } from '../utils/messageUtils';
 import { Message as MessageModel } from '../models/Message';
 import type { Message } from '../models/Message';
+import { StreamingController } from './StreamingController';
 
 export interface SelectionRange {
   filePath: string;
@@ -65,6 +66,12 @@ export class Session {
   private currentConnectionPromise?: Promise<BaseTransport>;
   private lastSentSelection?: SelectionRange;
   private effectCleanup?: () => void;
+
+  /**
+   * Streaming controller for handling SDK stream events
+   * CLEANUP: Disposed in dispose()
+   */
+  private readonly streamingController: StreamingController;
 
   readonly connection = signal<BaseTransport | undefined>(undefined);
 
@@ -128,8 +135,35 @@ export class Session {
   ) {
     this.isExplicit(options.isExplicit ?? true);
 
+    // Initialize streaming controller with callbacks
+    this.streamingController = new StreamingController();
+    this.setupStreamingCallbacks();
+
     effect(() => {
       this.selection(this.context.currentSelection());
+    });
+  }
+
+  /**
+   * Set up streaming controller callbacks
+   */
+  private setupStreamingCallbacks(): void {
+    // Called when a new streaming message is created
+    this.streamingController.setOnMessageCreated((message, _parentToolUseId) => {
+      // Add streaming message to messages array
+      this.messages([...this.messages(), message]);
+    });
+
+    // Called when a streaming message is finalized
+    this.streamingController.setOnMessageFinalized((_message, _parentToolUseId) => {
+      // Message is already in the array from onMessageCreated
+      // Just trigger a re-render by updating the signal
+      this.messages([...this.messages()]);
+    });
+
+    // Called when usage data is updated
+    this.streamingController.setOnUsageUpdate((usage) => {
+      this.updateUsage(usage);
     });
   }
 
@@ -371,9 +405,13 @@ export class Session {
   }
 
   dispose(): void {
+    // CLEANUP: Stop effect watchers
     if (this.effectCleanup) {
       this.effectCleanup();
     }
+
+    // CLEANUP: Dispose streaming controller
+    this.streamingController.dispose();
   }
 
   private async readMessages(stream: AsyncIterable<any>): Promise<void> {
@@ -390,27 +428,29 @@ export class Session {
   }
 
   private processIncomingMessage(event: any): void {
-    // 🔥 使用完整的消息处理流程
+    // Route stream_event to streaming controller for real-time streaming
+    if (event?.type === 'stream_event') {
+      const streamEvent = event.event;
+      const parentToolUseId = event.parent_tool_use_id ?? null;
+      this.streamingController.handleStreamEvent(streamEvent, parentToolUseId);
+      return; // Stream events are fully handled by controller
+    }
 
-    // 1. 获取当前消息数组（转为可变数组）
+    // 1. Get current messages array (as mutable copy)
     const currentMessages = [...this.messages()] as Message[];
 
-    // 2. 处理特殊消息（TodoWrite, usage 等）
+    // 2. Process special messages (TodoWrite, usage, etc.)
     this.processMessage(event);
 
-    // 3. 使用工具函数处理消息：
-    //    - 关联 tool_result 到 tool_use（响应式更新）
-    //    - 将原始事件转换为 Message 并添加到数组
+    // 3. Use utility function to process message:
+    //    - Attach tool_result to tool_use (reactive update)
+    //    - Convert raw event to Message and add to array
     processAndAttachMessage(currentMessages, event);
 
-    // 4. 合并连续 Read 消息为 ReadCoalesced（已禁用，保留作为参考）
-    // const merged = mergeConsecutiveReadMessages(currentMessages);
-
-    // 5. 更新 messages signal
-    // this.messages(merged);
+    // 4. Update messages signal
     this.messages(currentMessages);
 
-    // 6. 更新其他状态
+    // 5. Update other state
     if (event?.type === 'system') {
       this.sessionId(event.session_id);
       if (event.subtype === 'init') {

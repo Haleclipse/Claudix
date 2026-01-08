@@ -259,12 +259,15 @@ export class WebViewService implements IWebViewService {
 			vscode.Uri.joinPath(extensionUri, 'dist', 'media', 'style.css')
 		);
 
+		// CSP: 'unsafe-eval' and 'blob:' required for mermaid diagram rendering
+		// Mermaid v10+ uses dynamic ESM imports and eval for diagram parsing
+		// See: https://github.com/mermaid-js/mermaid/issues/5453
 		const csp = [
 			`default-src 'none';`,
 			`img-src ${webview.cspSource} https: data:;`,
 			`style-src ${webview.cspSource} 'unsafe-inline' https://*.vscode-cdn.net;`,
 			`font-src ${webview.cspSource} data:;`,
-			`script-src ${webview.cspSource} 'nonce-${nonce}';`,
+			`script-src ${webview.cspSource} 'nonce-${nonce}' 'unsafe-eval' blob:;`,
 			`connect-src ${webview.cspSource} https:;`,
 			`worker-src ${webview.cspSource} blob:;`,
 		].join(' ');
@@ -309,13 +312,14 @@ export class WebViewService implements IWebViewService {
 			wsUrl = 'ws://localhost:5173';
 		}
 
-		// Vite 开发场景的 CSP：允许连接 devServer 与 HMR 的 ws
+		// Dev CSP: allows devServer + HMR websocket
+		// 'unsafe-eval' and 'blob:' required for mermaid (see production CSP comment)
 		const csp = [
 			`default-src 'none';`,
 			`img-src ${webview.cspSource} https: data:;`,
 			`style-src ${webview.cspSource} 'unsafe-inline' ${origin} https://*.vscode-cdn.net;`,
 			`font-src ${webview.cspSource} data: ${origin};`,
-			`script-src ${webview.cspSource} 'nonce-${nonce}' 'unsafe-eval' ${origin};`,
+			`script-src ${webview.cspSource} 'nonce-${nonce}' 'unsafe-eval' ${origin} blob:;`,
 			`connect-src ${webview.cspSource} ${origin} ${wsUrl} https:;`,
 			`worker-src ${webview.cspSource} blob:;`,
 		].join(' ');

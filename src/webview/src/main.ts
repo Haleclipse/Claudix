@@ -1,8 +1,11 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
+import { enableMermaid, setCustomComponents } from 'markstream-vue';
 import App from './App.vue';
+import MermaidDiagram from './components/Messages/MermaidDiagram.vue';
 import '@vscode/codicons/dist/codicon.css';
 import '@mdi/font/css/materialdesignicons.min.css';
+import 'markstream-vue/index.css';
 import 'virtual:svg-icons-register';
 
 declare global {
@@ -18,6 +21,12 @@ declare global {
     };
   }
 }
+
+// Register custom Mermaid component BEFORE app mount
+setCustomComponents({
+  mermaid: MermaidDiagram
+});
+enableMermaid();
 
 const pinia = createPinia();
 const app = createApp(App);

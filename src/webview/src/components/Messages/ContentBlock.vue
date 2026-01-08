@@ -1,14 +1,15 @@
 <template>
-  <!-- 根据 block.type 选择性传递 wrapper -->
-  <!-- 只有 tool_use 需要 wrapper 来访问 toolResult Signal -->
+  <!-- Pass wrapper to blocks that need reactive streaming/toolResult access -->
+  <!-- tool_use: needs wrapper for toolResult Signal -->
+  <!-- text/thinking: needs wrapper for streaming text Signal -->
   <component
-    v-if="block.type === 'tool_use'"
+    v-if="needsWrapper"
     :is="blockComponent"
     :block="block"
     :wrapper="wrapper"
     :context="context"
   />
-  <!-- 其他类型不需要 wrapper，避免渲染到 DOM -->
+  <!-- Other types don't need wrapper -->
   <component
     v-else
     :is="blockComponent"
@@ -44,7 +45,13 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// 根据 block.type 选择对应的组件
+// Blocks that need wrapper for reactive streaming or toolResult access
+const needsWrapper = computed(() => {
+  const type = props.block.type;
+  return type === 'tool_use' || type === 'text' || type === 'thinking';
+});
+
+// Select component based on block.type
 const blockComponent = computed(() => {
   switch (props.block.type) {
     case 'text':
