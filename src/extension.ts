@@ -50,6 +50,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// Connect WebView messages to Claude Agent Service
 		webViewService.setMessageHandler((message) => {
+			// Update editor panel title if message includes panelTitle and instanceId
+			if (message.panelTitle && message.instanceId) {
+				webViewService.updatePanelTitle(message.instanceId, message.panelTitle);
+			}
 			claudeAgentService.fromClient(message);
 		});
 
@@ -74,6 +78,22 @@ export function activate(context: vscode.ExtensionContext) {
 						webViewServiceInner.openEditorPage('settings', 'Claudix Settings');
 					} catch (error) {
 						logServiceInner.error('[Command] 打开 Settings 页面失败', error);
+					}
+				});
+			})
+		);
+
+		context.subscriptions.push(
+			vscode.commands.registerCommand('claudix.openChatInEditor', () => {
+				instantiationService.invokeFunction(accessorInner => {
+					const webViewServiceInner = accessorInner.get(IWebViewService);
+					const logServiceInner = accessorInner.get(ILogService);
+					try {
+						const instanceId = `chat-${Date.now()}`;
+						webViewServiceInner.openEditorPage('chat', 'Claudix Chat', instanceId);
+						logServiceInner.info(`[Command] Opened chat in editor: ${instanceId}`);
+					} catch (error) {
+						logServiceInner.error('[Command] Failed to open chat in editor', error);
 					}
 				});
 			})

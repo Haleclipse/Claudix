@@ -49,6 +49,8 @@ export interface IOMessage extends BaseMessage {
     channelId: string;
     message: SDKMessage | SDKUserMessage;  // SDK 消息类型
     done: boolean;                         // 是否为流的最后一条
+    panelTitle?: string;                   // Editor panel title (editor host only)
+    instanceId?: string;                   // Panel instance ID (editor host only)
 }
 
 /**

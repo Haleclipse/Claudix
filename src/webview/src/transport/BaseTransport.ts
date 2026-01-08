@@ -95,8 +95,8 @@ export abstract class BaseTransport {
     return queue;
   }
 
-  sendInput(channelId: string, message: any, done: boolean): void {
-    this.send({ type: "io_message", channelId, message, done });
+  sendInput(channelId: string, message: any, done: boolean, panelTitle?: string, instanceId?: string): void {
+    this.send({ type: "io_message", channelId, message, done, panelTitle, instanceId });
   }
 
   interruptClaude(channelId: string): void {

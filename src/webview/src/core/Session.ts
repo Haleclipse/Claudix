@@ -232,7 +232,17 @@ export class Session {
     try {
       const channelId = this.claudeChannelId();
       if (!channelId) throw new Error('No active channel');
-      connection.sendInput(channelId, userMessage, false);
+
+      // Update editor panel title with user input
+      const bootstrap = window.CLAUDIX_BOOTSTRAP;
+      const isEditor = bootstrap?.host === 'editor' && bootstrap?.id;
+      connection.sendInput(
+        channelId,
+        userMessage,
+        false,
+        isEditor ? input : undefined,
+        isEditor ? bootstrap.id : undefined
+      );
     } catch (error) {
       this.busy(false);
       throw error;

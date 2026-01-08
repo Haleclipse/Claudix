@@ -77,6 +77,11 @@
       {
         "command": "claudix.openSettings",
         "title": "Claudix: Open Settings"
+      },
+      {
+        "command": "claudix.openChatInEditor",
+        "title": "Claudix: Open Chat in Editor",
+        "icon": "$(comment-discussion)"
       }
     ]
   },

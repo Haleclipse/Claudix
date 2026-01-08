@@ -15,6 +15,7 @@ declare global {
     CLAUDIX_BOOTSTRAP?: {
       host?: 'sidebar' | 'editor';
       page?: string;
+      id?: string;
     };
   }
 }
