@@ -59,11 +59,48 @@ export function activate(context: vscode.ExtensionContext) {
 		// Set transport on Claude Agent Service
 		claudeAgentService.setTransport(transport);
 
+		// 监听选区变化并通知 WebView
+		const sendSelectionUpdate = (editor?: vscode.TextEditor) => {
+			const selection = editor?.selection;
+			if (!editor || !selection || selection.isEmpty || editor.document.uri.scheme !== 'file') {
+				transport.send({
+					type: 'request',
+					requestId: Math.random().toString(36).slice(2),
+					request: { type: 'selection_changed', selection: null }
+				});
+				return;
+			}
+			const document = editor.document;
+			transport.send({
+				type: 'request',
+				requestId: Math.random().toString(36).slice(2),
+				request: {
+					type: 'selection_changed',
+					selection: {
+						filePath: document.uri.fsPath,
+						startLine: selection.start.line + 1,
+						endLine: selection.end.line + 1,
+						startColumn: selection.start.character,
+						endColumn: selection.end.character
+					}
+				}
+			});
+		};
+
+		const selectionDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
+			sendSelectionUpdate(event.textEditor);
+		});
+		const activeEditorDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+			sendSelectionUpdate(editor);
+		});
+
 		// Start message loop
 		claudeAgentService.start();
 
 		// Register disposables
 		context.subscriptions.push(webviewProvider);
+		context.subscriptions.push(selectionDisposable);
+		context.subscriptions.push(activeEditorDisposable);
 		context.subscriptions.push(
 			vscode.commands.registerCommand('claudix.openSettings', async () => {
 				await instantiationService.invokeFunction(accessorInner => {
