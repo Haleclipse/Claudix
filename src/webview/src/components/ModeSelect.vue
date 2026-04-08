@@ -52,6 +52,18 @@
         :index="2"
         @click="(item) => handleModeSelect(item, close)"
       />
+      <DropdownItem
+        :item="{
+          id: 'bypassPermissions',
+          label: 'YOLO',
+          icon: 'codicon-flame text-[14px]!',
+          checked: permissionMode === 'bypassPermissions',
+          type: 'yolo-mode'
+        }"
+        :is-selected="permissionMode === 'bypassPermissions'"
+        :index="3"
+        @click="(item) => handleModeSelect(item, close)"
+      />
     </template>
   </DropdownTrigger>
 </template>
@@ -82,6 +94,8 @@ const selectedModeLabel = computed(() => {
       return 'Agent'
     case 'plan':
       return 'Plan'
+    case 'bypassPermissions':
+      return 'YOLO'
     case 'default':
       return 'Default'
     default:
@@ -96,6 +110,8 @@ const selectedModeIcon = computed(() => {
       return 'codicon-infinity'
     case 'plan':
       return 'codicon-todos'
+    case 'bypassPermissions':
+      return 'codicon-flame'
     case 'default':
       return 'codicon-chat'
     default:
